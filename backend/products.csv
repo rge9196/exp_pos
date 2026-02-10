@@ -1,0 +1,5 @@
+id,name,alias,category,list_price,image_url,is_active,created_at
+1,Coca-Cola,Coke,Drinks,18.0,https://placehold.co/200x200.png?text=Coke,1,2026-02-07 18:54:04
+2,Chips,Potato Chips,Snacks,25.5,https://placehold.co/200x200.png?text=Chips,1,2026-02-07 18:54:04
+3,Chocolate Bar,Chocolate,Snacks,12.0,https://picsum.photos/200?random=1,1,2026-02-07 18:54:04
+4,Coffee,Americano,Drinks,35.0,https://picsum.photos/200?random=2,1,2026-02-07 18:54:04
