@@ -47,11 +47,6 @@ export default function OrderLine({ line }) {
           >
             ${line.price.toFixed(2)}
           </button>
-          {line.price !== line.listPrice && (
-            <span className="ml-2 line-through">
-              ${line.listPrice.toFixed(2)}
-            </span>
-          )}
         </div>
 
         {line.comment && (
@@ -79,7 +74,15 @@ export default function OrderLine({ line }) {
           +
         </button>
 
-        <div className="ml-1 text-sm">${line.lineTotal.toFixed(2)}</div>
+        <div
+          className={`ml-1 text-sm transition-colors ${
+            line.price !== line.listPrice
+              ? "text-emerald-400 font-medium drop-shadow-[0_0_6px_rgba(52,211,153,0.4)]"
+              : "text-white"
+          }`}
+        >
+          ${line.lineTotal.toFixed(2)}
+        </div>
       </div>
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
