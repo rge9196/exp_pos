@@ -6,6 +6,7 @@ export default function OrderLinesPanel() {
   const totals = useOrderStore((s) => s.totals);
 
   const { subtotal, qty } = totals();
+  console.log(lines, subtotal, qty);
 
   return (
     <section className="h-full bg-bg text-fg rounded-xl border border-zinc-800 p-4">
@@ -19,9 +20,7 @@ export default function OrderLinesPanel() {
         {lines.length === 0 ? (
           <p className="text-sm text-zinc-500">No items yet.</p>
         ) : (
-          lines.map((l) => (
-            <OrderLine key={l.productId} line={l} />
-          ))
+          lines.map((l) => <OrderLine key={l.productId} line={l} />)
         )}
       </div>
     </section>
