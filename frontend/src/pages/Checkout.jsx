@@ -24,7 +24,9 @@ export default function Checkout() {
   const methods = usePaymentMethodsStore((s) => s.items);
   const methodsLoading = usePaymentMethodsStore((s) => s.loading);
   const methodsError = usePaymentMethodsStore((s) => s.error);
-  const loadPaymentMethods = usePaymentMethodsStore((s) => s.loadPaymentMethods);
+  const loadPaymentMethods = usePaymentMethodsStore(
+    (s) => s.loadPaymentMethods,
+  );
 
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [submitError, setSubmitError] = useState(null);
@@ -153,32 +155,34 @@ export default function Checkout() {
           <section className="border border-zinc-800 rounded-lg p-3">
             <div className="text-sm font-medium">Order Lines</div>
             <div className="mt-2 space-y-2">
-          {lines.map((l) => (
-            <div
-              key={l.productId}
-              className="flex items-center justify-between border border-zinc-800 rounded-md p-2"
-            >
-              <div className="min-w-0">
-                <div className="truncate font-medium">{l.name}</div>
-                <div className="text-xs text-zinc-400">
-                  {l.qty} × ${formatMoney(l.priceCents)}
-                </div>
-                {l.comment && (
-                  <div className="text-xs text-zinc-500 italic truncate">
-                    “{l.comment}”
+              {lines.map((l) => (
+                <div
+                  key={l.productId}
+                  className="flex items-center justify-between border border-zinc-800 rounded-md p-2"
+                >
+                  <div className="min-w-0">
+                    <div className="truncate font-medium">{l.name}</div>
+                    <div className="text-xs text-zinc-400">
+                      {l.qty} × ${formatMoney(l.priceCents)}
+                    </div>
+                    {l.comment && (
+                      <div className="text-xs text-zinc-500 italic truncate">
+                        “{l.comment}”
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
-              <div className="text-sm">${formatMoney(l.lineTotalCents)}</div>
+                  <div className="text-sm">
+                    ${formatMoney(l.lineTotalCents)}
+                  </div>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
 
-        <div className="mt-3 flex items-center justify-between text-sm">
-          <span className="text-zinc-400">Subtotal</span>
-          <span className="font-medium">${formatMoney(subtotal)}</span>
-        </div>
-      </section>
+            <div className="mt-3 flex items-center justify-between text-sm">
+              <span className="text-zinc-400">Subtotal</span>
+              <span className="font-medium">${formatMoney(subtotal)}</span>
+            </div>
+          </section>
 
           <section className="border border-zinc-800 rounded-lg p-3 flex flex-col">
             <div className="text-sm font-medium">Payments</div>
@@ -269,7 +273,9 @@ export default function Checkout() {
               {paid > subtotal && (
                 <div className="flex items-center justify-between">
                   <span className="text-zinc-400">Change</span>
-                  <span className="text-emerald-400">${formatMoney(change)}</span>
+                  <span className="text-emerald-400">
+                    ${formatMoney(change)}
+                  </span>
                 </div>
               )}
             </div>
@@ -322,7 +328,10 @@ export default function Checkout() {
             <div className="mt-2 text-xs text-zinc-400">Payments</div>
             <div className="mt-1 space-y-1">
               {payments.map((p) => (
-                <div key={p.id} className="flex items-center justify-between text-sm">
+                <div
+                  key={p.id}
+                  className="flex items-center justify-between text-sm"
+                >
                   <span>{p.methodName}</span>
                   <span>${formatMoney(p.amountCents)}</span>
                 </div>
