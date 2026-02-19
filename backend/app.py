@@ -1,5 +1,5 @@
 from flask import Flask, request, jsonify
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from cs50 import SQL
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -77,6 +77,42 @@ app.config["JWT_COOKIE_SAMESITE"] = "Lax"
 app.config["JWT_COOKIE_CSRF_PROTECT"] = False    # baby steps
 
 jwt = JWTManager(app)
+
+def resolve_date_range(start_date, end_date):
+    def is_valid(d):
+        try:
+            datetime.strptime(d, "%Y-%m-%d")
+            return True
+        except Exception:
+            return False
+
+    if start_date and not is_valid(start_date):
+        return None, "invalid start_date"
+    if end_date and not is_valid(end_date):
+        return None, "invalid end_date"
+
+    if not start_date and not end_date:
+        today = date.today().isoformat()
+        start_date = today
+        end_date = today
+    elif start_date and not end_date:
+        end_date = start_date
+    elif end_date and not start_date:
+        start_date = end_date
+
+    if start_date > end_date:
+        return None, "start_date must be <= end_date"
+
+    end_exclusive = (
+        datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
+    ).strftime("%Y-%m-%d")
+
+    return {
+        "start": start_date,
+        "end": end_date,
+        "start_ts": f"{start_date} 00:00:00",
+        "end_ts_exclusive": f"{end_exclusive} 00:00:00",
+    }, None
 
 
 def validate_register(data):
@@ -214,29 +250,12 @@ def get_payment_methods():
 @app.get("/api/reports/z")
 @jwt_required()
 def z_report():
-    start_date = request.args.get("start_date")
-    end_date = request.args.get("end_date")
-
-    def is_valid(d):
-        try:
-            datetime.strptime(d, "%Y-%m-%d")
-            return True
-        except Exception:
-            return False
-
-    if start_date and not is_valid(start_date):
-        return jsonify({"ok": False, "error": "invalid start_date"}), 400
-    if end_date and not is_valid(end_date):
-        return jsonify({"ok": False, "error": "invalid end_date"}), 400
-
-    if not start_date and not end_date:
-        today = date.today().isoformat()
-        start_date = today
-        end_date = today
-    elif start_date and not end_date:
-        end_date = start_date
-    elif end_date and not start_date:
-        start_date = end_date
+    date_range, error = resolve_date_range(
+        request.args.get("start_date"),
+        request.args.get("end_date")
+    )
+    if error:
+        return jsonify({"ok": False, "error": error}), 400
 
     totals_row = db.execute(
         """
@@ -246,9 +265,10 @@ def z_report():
             COALESCE(SUM(total_paid_cents), 0) AS paid_cents,
             COALESCE(SUM(change_cents), 0) AS change_cents
         FROM orders
-        WHERE (status IS NULL OR status != 'void') AND date(created_at) BETWEEN date(?) AND date(?)
+        WHERE (status IS NULL OR status != 'void')
+          AND date(datetime(created_at, '-6 hours')) BETWEEN date(?) AND date(?)
         """,
-        start_date, end_date
+        date_range["start"], date_range["end"]
     )
     totals = totals_row[0] if totals_row else {
         "orders_count": 0, "subtotal_cents": 0, "paid_cents": 0, "change_cents": 0
@@ -262,15 +282,16 @@ def z_report():
         FROM payments p
         JOIN payment_methods pm ON pm.id = p.payment_method_id
         JOIN orders o ON o.id = p.order_id
-        WHERE (o.status IS NULL OR o.status != 'void') AND date(o.created_at) BETWEEN date(?) AND date(?)
+        WHERE (o.status IS NULL OR o.status != 'void')
+          AND date(datetime(o.created_at, '-6 hours')) BETWEEN date(?) AND date(?)
         GROUP BY pm.id, pm.name
         ORDER BY pm.id
         """,
-        start_date, end_date
+        date_range["start"], date_range["end"]
     )
 
     return jsonify({
-        "range": {"start": start_date, "end": end_date},
+        "range": {"start": date_range["start"], "end": date_range["end"]},
         "totals": {
             "orders_count": int(totals["orders_count"]),
             "subtotal_cents": int(totals["subtotal_cents"]),
@@ -286,29 +307,12 @@ def z_report():
 @app.get("/api/reports/products")
 @jwt_required()
 def product_report():
-    start_date = request.args.get("start_date")
-    end_date = request.args.get("end_date")
-
-    def is_valid(d):
-        try:
-            datetime.strptime(d, "%Y-%m-%d")
-            return True
-        except Exception:
-            return False
-
-    if start_date and not is_valid(start_date):
-        return jsonify({"ok": False, "error": "invalid start_date"}), 400
-    if end_date and not is_valid(end_date):
-        return jsonify({"ok": False, "error": "invalid end_date"}), 400
-
-    if not start_date and not end_date:
-        today = date.today().isoformat()
-        start_date = today
-        end_date = today
-    elif start_date and not end_date:
-        end_date = start_date
-    elif end_date and not start_date:
-        start_date = end_date
+    date_range, error = resolve_date_range(
+        request.args.get("start_date"),
+        request.args.get("end_date")
+    )
+    if error:
+        return jsonify({"ok": False, "error": error}), 400
 
     rows = db.execute(
         """
@@ -320,15 +324,16 @@ def product_report():
             SUM(ol.line_total_cents) AS total_cents
         FROM order_lines ol
         JOIN orders o ON o.id = ol.order_id
-        WHERE (o.status IS NULL OR o.status != 'void') AND date(o.created_at) BETWEEN date(?) AND date(?)
+        WHERE (o.status IS NULL OR o.status != 'void')
+          AND date(datetime(o.created_at, '-6 hours')) BETWEEN date(?) AND date(?)
         GROUP BY ol.product_id, ol.name, ol.unit_price_cents
         ORDER BY ol.name, ol.unit_price_cents DESC
         """,
-        start_date, end_date
+        date_range["start"], date_range["end"]
     )
 
     return jsonify({
-        "range": {"start": start_date, "end": end_date},
+        "range": {"start": date_range["start"], "end": date_range["end"]},
         "rows": [
             {
                 "product_id": int(r["product_id"]),
@@ -459,34 +464,18 @@ def refund_order(order_id):
 @app.get("/api/orders")
 @jwt_required()
 def list_orders():
-    start_date = request.args.get("start_date")
-    end_date = request.args.get("end_date")
+    date_range, error = resolve_date_range(
+        request.args.get("start_date"),
+        request.args.get("end_date")
+    )
+    if error:
+        return jsonify({"ok": False, "error": error}), 400
+
     status = (request.args.get("status") or "all").lower()
     q = (request.args.get("q") or "").strip()
 
-    def is_valid(d):
-        try:
-            datetime.strptime(d, "%Y-%m-%d")
-            return True
-        except Exception:
-            return False
-
-    if start_date and not is_valid(start_date):
-        return jsonify({"ok": False, "error": "invalid start_date"}), 400
-    if end_date and not is_valid(end_date):
-        return jsonify({"ok": False, "error": "invalid end_date"}), 400
-
-    if not start_date and not end_date:
-        today = date.today().isoformat()
-        start_date = today
-        end_date = today
-    elif start_date and not end_date:
-        end_date = start_date
-    elif end_date and not start_date:
-        start_date = end_date
-
-    params = [start_date, end_date]
-    filters = ["date(o.created_at) BETWEEN date(?) AND date(?)"]
+    params = [date_range["start"], date_range["end"]]
+    filters = ["date(datetime(o.created_at, '-6 hours')) BETWEEN date(?) AND date(?)"]
 
     if status in ("paid", "void", "refund"):
         filters.append("o.status = ?")
@@ -517,7 +506,7 @@ def list_orders():
     )
 
     return jsonify({
-        "range": {"start": start_date, "end": end_date},
+        "range": {"start": date_range["start"], "end": date_range["end"]},
         "orders": [
             {
                 "id": r["id"],
