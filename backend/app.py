@@ -246,7 +246,7 @@ def z_report():
             COALESCE(SUM(total_paid_cents), 0) AS paid_cents,
             COALESCE(SUM(change_cents), 0) AS change_cents
         FROM orders
-        WHERE date(created_at) BETWEEN date(?) AND date(?)
+        WHERE (status IS NULL OR status != 'void') AND date(created_at) BETWEEN date(?) AND date(?)
         """,
         start_date, end_date
     )
@@ -262,7 +262,7 @@ def z_report():
         FROM payments p
         JOIN payment_methods pm ON pm.id = p.payment_method_id
         JOIN orders o ON o.id = p.order_id
-        WHERE date(o.created_at) BETWEEN date(?) AND date(?)
+        WHERE (o.status IS NULL OR o.status != 'void') AND date(o.created_at) BETWEEN date(?) AND date(?)
         GROUP BY pm.id, pm.name
         ORDER BY pm.id
         """,
@@ -320,7 +320,7 @@ def product_report():
             SUM(ol.line_total_cents) AS total_cents
         FROM order_lines ol
         JOIN orders o ON o.id = ol.order_id
-        WHERE date(o.created_at) BETWEEN date(?) AND date(?)
+        WHERE (o.status IS NULL OR o.status != 'void') AND date(o.created_at) BETWEEN date(?) AND date(?)
         GROUP BY ol.product_id, ol.name, ol.unit_price_cents
         ORDER BY ol.name, ol.unit_price_cents DESC
         """,
@@ -339,6 +339,121 @@ def product_report():
             }
             for r in rows
         ],
+    }), 200
+
+@app.post("/api/orders/<int:order_id>/void")
+@jwt_required()
+def void_order(order_id):
+    data = request.get_json(silent=True) or {}
+    reason = (data.get("reason") or "").strip()
+
+    rows = db.execute("SELECT id, status FROM orders WHERE id = ?", order_id)
+    if not rows:
+        return jsonify({"ok": False, "error": "order not found"}), 404
+    if rows[0]["status"] not in (None, "paid"):
+        return jsonify({"ok": False, "error": "order not voidable"}), 400
+
+    db.execute(
+        "UPDATE orders SET status = 'void', voided_at = CURRENT_TIMESTAMP, void_reason = ? WHERE id = ?",
+        reason or None, order_id
+    )
+
+    order = db.execute(
+        "SELECT id, status, voided_at, void_reason FROM orders WHERE id = ?",
+        order_id
+    )[0]
+    return jsonify({"ok": True, "order": order}), 200
+
+
+@app.post("/api/orders/<int:order_id>/refund")
+@jwt_required()
+def refund_order(order_id):
+    data = request.get_json(silent=True) or {}
+    payments = data.get("payments") or []
+
+    rows = db.execute(
+        "SELECT id, user_id, subtotal_cents, status FROM orders WHERE id = ?",
+        order_id
+    )
+    if not rows:
+        return jsonify({"ok": False, "error": "order not found"}), 404
+    original = rows[0]
+    if original["status"] not in (None, "paid"):
+        return jsonify({"ok": False, "error": "order not refundable"}), 400
+
+    method_rows = db.execute("SELECT id FROM payment_methods WHERE is_active = 1")
+    valid_methods = {int(r["id"]) for r in method_rows}
+
+    total_refund = 0
+    cleaned_payments = []
+    for p in payments:
+        try:
+            method_id = int(p.get("payment_method_id") or 0)
+            amount_cents = int(p.get("amount_cents") or 0)
+        except Exception:
+            return jsonify({"ok": False, "error": "invalid payment"}), 400
+        if method_id <= 0 or amount_cents <= 0:
+            return jsonify({"ok": False, "error": "invalid payment"}), 400
+        if method_id not in valid_methods:
+            return jsonify({"ok": False, "error": "payment method not found"}), 400
+        total_refund += amount_cents
+        cleaned_payments.append({"method_id": method_id, "amount_cents": amount_cents})
+
+    if total_refund != original["subtotal_cents"]:
+        return jsonify({"ok": False, "error": "refund must equal original subtotal"}), 400
+
+    try:
+        db.execute("BEGIN")
+        refund_id = db.execute(
+            """
+            INSERT INTO orders (user_id, subtotal_cents, total_paid_cents, change_cents, status, original_order_id)
+            VALUES (?, ?, ?, 0, 'refund', ?)
+            """,
+            int(get_jwt_identity()), -original["subtotal_cents"], -total_refund, order_id
+        )
+
+        lines = db.execute(
+            """
+            SELECT product_id, name, qty, unit_price_cents, line_total_cents, comment
+            FROM order_lines WHERE order_id = ?
+            """,
+            order_id
+        )
+
+        for l in lines:
+            db.execute(
+                """
+                INSERT INTO order_lines (order_id, product_id, name, qty, unit_price_cents, line_total_cents, comment)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                refund_id,
+                l["product_id"],
+                l["name"],
+                -int(l["qty"]),
+                int(l["unit_price_cents"]),
+                -int(l["line_total_cents"]),
+                l["comment"]
+            )
+
+        for p in cleaned_payments:
+            db.execute(
+                """
+                INSERT INTO payments (order_id, payment_method_id, amount_cents)
+                VALUES (?, ?, ?)
+                """,
+                refund_id, p["method_id"], -p["amount_cents"]
+            )
+
+        db.execute("COMMIT")
+    except Exception:
+        db.execute("ROLLBACK")
+        return jsonify({"ok": False, "error": "database error"}), 500
+
+    return jsonify({
+        "ok": True,
+        "refund_order_id": refund_id,
+        "original_order_id": order_id,
+        "receipt_text": ""
     }), 200
 
 @app.post("/api/orders")
@@ -452,6 +567,7 @@ def create_order():
         "totalPaidCents": total_paid_cents,
         "changeCents": change_cents,
         "createdAt": order["created_at"] if order else None,
+        "status": "paid",
         "lines": [
             {
                 "id": i + 1,
