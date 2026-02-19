@@ -12,17 +12,18 @@ export default function OrderLine({ line }) {
 
   // ----- Price modal state
   const [isPriceOpen, setIsPriceOpen] = useState(false);
-  const [tempPrice, setTempPrice] = useState(line.price);
+  const [tempPrice, setTempPrice] = useState(line.priceCents / 100);
 
   const openPrice = () => {
-    setTempPrice(line.price);
+    setTempPrice(line.priceCents / 100);
     setIsPriceOpen(true);
   };
   const closePrice = () => setIsPriceOpen(false);
   const savePrice = () => {
     const num = Number(tempPrice);
     if (!Number.isFinite(num) || num < 0) return;
-    setLinePrice(line.productId, num);
+    const cents = Math.round(num * 100);
+    setLinePrice(line.productId, cents);
     closePrice();
   };
 
@@ -40,7 +41,7 @@ export default function OrderLine({ line }) {
     closeComment();
   };
 
-  const priceChanged = line.price !== line.listPrice;
+  const priceChanged = line.priceCents !== line.listPriceCents;
 
   return (
     <div className="relative flex items-center justify-between border border-zinc-800 rounded-lg p-2">
@@ -68,7 +69,7 @@ export default function OrderLine({ line }) {
               aria-label="Edit price"
               type="button"
             >
-              ${line.price.toFixed(2)}
+              ${(line.priceCents / 100).toFixed(2)}
             </button>
           </span>
 
@@ -124,7 +125,7 @@ export default function OrderLine({ line }) {
               : "text-white"
           }`}
         >
-          ${line.lineTotal.toFixed(2)}
+          ${(line.lineTotalCents / 100).toFixed(2)}
         </div>
       </div>
 

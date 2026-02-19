@@ -14,6 +14,56 @@ from flask_jwt_extended import (
 app = Flask(__name__)
 db = SQL("sqlite:///pos.db")
 
+# --- DB bootstrap
+def init_db():
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS payment_methods (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            is_active INTEGER NOT NULL DEFAULT 1
+        )
+    """)
+
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS orders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            subtotal_cents INTEGER NOT NULL,
+            total_paid_cents INTEGER NOT NULL,
+            change_cents INTEGER NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS order_lines (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_id INTEGER NOT NULL,
+            product_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            qty INTEGER NOT NULL,
+            unit_price_cents INTEGER NOT NULL,
+            line_total_cents INTEGER NOT NULL,
+            comment TEXT
+        )
+    """)
+
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS payments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_id INTEGER NOT NULL,
+            payment_method_id INTEGER NOT NULL,
+            amount_cents INTEGER NOT NULL
+        )
+    """)
+
+    db.execute("INSERT OR IGNORE INTO payment_methods (name) VALUES (?)", "Cash")
+    db.execute("INSERT OR IGNORE INTO payment_methods (name) VALUES (?)", "Deposit")
+    db.execute("INSERT OR IGNORE INTO payment_methods (name) VALUES (?)", "Card")
+
+
+init_db()
+
 # JWT cookie setup (minimal)
 app.config["JWT_SECRET_KEY"] = (
     "Yz3k9pXfR4mT8sQwL2bAqHnVjK7rS5dP"
@@ -147,6 +197,155 @@ def get_products():
 
     return jsonify({"products": products})
 
+
+@app.get("/api/payment-methods")
+@jwt_required()
+def get_payment_methods():
+    rows = db.execute("""
+        SELECT id, name
+        FROM payment_methods
+        WHERE is_active = 1
+        ORDER BY id
+    """)
+    methods = [{"id": r["id"], "name": r["name"]} for r in rows]
+    return jsonify({"methods": methods})
+
+
+@app.post("/api/orders")
+@jwt_required()
+def create_order():
+    data = request.get_json(silent=True) or {}
+    raw_lines = data.get("lines") or []
+    raw_payments = data.get("payments") or []
+
+    if not raw_lines:
+        return jsonify({"ok": False, "error": "no order lines"}), 400
+
+    user_id = int(get_jwt_identity())
+
+    # Load payment methods for validation
+    method_rows = db.execute("SELECT id, name FROM payment_methods WHERE is_active = 1")
+    methods = {int(r["id"]): r["name"] for r in method_rows}
+
+    cleaned_lines = []
+    subtotal_cents = 0
+    for l in raw_lines:
+        try:
+            product_id = int(l.get("productId") or 0)
+            name = (l.get("name") or "").strip()
+            qty = int(l.get("qty") or 0)
+            unit_price_cents = int(l.get("priceCents") or l.get("listPriceCents") or 0)
+            comment = (l.get("comment") or "").strip()
+        except Exception:
+            return jsonify({"ok": False, "error": "invalid line item"}), 400
+
+        if product_id <= 0 or not name or qty <= 0 or unit_price_cents < 0:
+            return jsonify({"ok": False, "error": "invalid line item"}), 400
+
+        line_total_cents = qty * unit_price_cents
+        subtotal_cents += line_total_cents
+        cleaned_lines.append({
+            "product_id": product_id,
+            "name": name,
+            "qty": qty,
+            "unit_price_cents": unit_price_cents,
+            "line_total_cents": line_total_cents,
+            "comment": comment,
+        })
+
+    cleaned_payments = []
+    total_paid_cents = 0
+    for p in raw_payments:
+        try:
+            method_id = int(p.get("methodId") or 0)
+            amount_cents = int(p.get("amountCents") or 0)
+        except Exception:
+            return jsonify({"ok": False, "error": "invalid payment"}), 400
+
+        if method_id <= 0 or amount_cents < 0:
+            return jsonify({"ok": False, "error": "invalid payment"}), 400
+        if method_id not in methods:
+            return jsonify({"ok": False, "error": "payment method not found"}), 400
+
+        total_paid_cents += amount_cents
+        if amount_cents > 0:
+            cleaned_payments.append({
+                "method_id": method_id,
+                "method_name": methods[method_id],
+                "amount_cents": amount_cents,
+            })
+
+    if total_paid_cents < subtotal_cents:
+        return jsonify({"ok": False, "error": "insufficient payment"}), 400
+
+    change_cents = max(0, total_paid_cents - subtotal_cents)
+
+    try:
+        db.execute("BEGIN")
+        order_id = db.execute(
+            "INSERT INTO orders (user_id, subtotal_cents, total_paid_cents, change_cents) VALUES (?, ?, ?, ?)",
+            user_id, subtotal_cents, total_paid_cents, change_cents
+        )
+
+        for l in cleaned_lines:
+            db.execute(
+                """
+                INSERT INTO order_lines (order_id, product_id, name, qty, unit_price_cents, line_total_cents, comment)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                order_id, l["product_id"], l["name"], l["qty"], l["unit_price_cents"], l["line_total_cents"], l["comment"] or None
+            )
+
+        for p in cleaned_payments:
+            db.execute(
+                """
+                INSERT INTO payments (order_id, payment_method_id, amount_cents)
+                VALUES (?, ?, ?)
+                """,
+                order_id, p["method_id"], p["amount_cents"]
+            )
+
+        db.execute("COMMIT")
+    except Exception:
+        db.execute("ROLLBACK")
+        return jsonify({"ok": False, "error": "database error"}), 500
+
+    order_row = db.execute(
+        "SELECT id, subtotal_cents, total_paid_cents, change_cents, created_at FROM orders WHERE id = ?",
+        order_id
+    )
+    order = order_row[0] if order_row else None
+
+    response = {
+        "id": order_id,
+        "subtotalCents": subtotal_cents,
+        "totalPaidCents": total_paid_cents,
+        "changeCents": change_cents,
+        "createdAt": order["created_at"] if order else None,
+        "lines": [
+            {
+                "id": i + 1,
+                "productId": l["product_id"],
+                "name": l["name"],
+                "qty": l["qty"],
+                "unitPriceCents": l["unit_price_cents"],
+                "lineTotalCents": l["line_total_cents"],
+                "comment": l["comment"],
+            }
+            for i, l in enumerate(cleaned_lines)
+        ],
+        "payments": [
+            {
+                "id": i + 1,
+                "methodId": p["method_id"],
+                "methodName": p["method_name"],
+                "amountCents": p["amount_cents"],
+            }
+            for i, p in enumerate(cleaned_payments)
+        ],
+    }
+
+    return jsonify({"ok": True, "order": response}), 200
 
 
 if __name__ == "__main__":

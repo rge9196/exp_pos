@@ -6,6 +6,8 @@ import Home from "./pages/Home";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Orders from "./pages/Orders";
+import Checkout from "./pages/Checkout";
+import Ticket from "./pages/Ticket";
 
 export default function App() {
   const me = useAuthStore((s) => s.me);
@@ -42,7 +44,6 @@ export default function App() {
               ) : (
                 <>
                   <Link to="/login">Login</Link>
-                  <Link to="/register">Register</Link>
                 </>
               )}
             </div>
@@ -54,6 +55,8 @@ export default function App() {
               <Route path="/login" element={<Login />} />
               <Route path="/register" element={<Register />} />
               <Route path="/orders" element={<Orders />} />
+              <Route path="/checkout" element={<Checkout />} />
+              <Route path="/ticket/:id" element={<Ticket />} />
             </Routes>
           </main>
 

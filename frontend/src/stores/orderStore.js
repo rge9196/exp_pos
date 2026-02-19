@@ -1,7 +1,9 @@
 import { create } from "zustand";
 
 export const useOrderStore = create((set, get) => ({
-  lines: [], // [{ productId, name, price, qty, lineTotal, imageUrl, category, alias }]
+  lines: [], // [{ productId, name, priceCents, qty, lineTotalCents, imageUrl, category, alias }]
+  payments: [], // [{ id, methodId, methodName, amountCents }]
+  lastOrder: null,
 
   addProduct: (p) => {
     const lines = get().lines;
@@ -13,7 +15,7 @@ export const useOrderStore = create((set, get) => ({
           ? {
               ...l,
               qty: l.qty + 1,
-              lineTotal: (l.qty + 1) * l.price, // uses SALE price
+              lineTotalCents: (l.qty + 1) * l.priceCents,
             }
           : l,
       );
@@ -21,7 +23,7 @@ export const useOrderStore = create((set, get) => ({
       return;
     }
 
-    const listPrice = Number(p.listPrice);
+    const listPriceCents = Math.round(Number(p.listPrice) * 100);
 
     set({
       lines: [
@@ -33,13 +35,13 @@ export const useOrderStore = create((set, get) => ({
           category: p.category,
           imageUrl: p.imageUrl,
 
-          listPrice, // ORIGINAL
-          price: listPrice, // SALE (editable)
+          listPriceCents,
+          priceCents: listPriceCents,
 
           qty: 1,
           comment: "",
 
-          lineTotal: listPrice,
+          lineTotalCents: listPriceCents,
         },
       ],
     });
@@ -58,7 +60,7 @@ export const useOrderStore = create((set, get) => ({
     set({
       lines: lines.map((l) =>
         l.productId === productId
-          ? { ...l, qty: l.qty - 1, lineTotal: (l.qty - 1) * l.price }
+          ? { ...l, qty: l.qty - 1, lineTotalCents: (l.qty - 1) * l.priceCents }
           : l,
       ),
     });
@@ -67,19 +69,19 @@ export const useOrderStore = create((set, get) => ({
   clear: () => set({ lines: [] }),
 
   totals: () => {
-    const subtotal = get().lines.reduce((sum, l) => sum + l.lineTotal, 0);
+    const subtotal = get().lines.reduce((sum, l) => sum + l.lineTotalCents, 0);
     const qty = get().lines.reduce((sum, l) => sum + l.qty, 0);
     return { subtotal, qty };
   },
 
-  setLinePrice: (productId, newPrice) => {
-    const price = Number(newPrice);
+  setLinePrice: (productId, newPriceCents) => {
+    const price = Number(newPriceCents);
     if (!Number.isFinite(price) || price < 0) return;
 
     set({
       lines: get().lines.map((l) =>
         l.productId === productId
-          ? { ...l, price, lineTotal: l.qty * price }
+          ? { ...l, priceCents: price, lineTotalCents: l.qty * price }
           : l,
       ),
     });
@@ -103,7 +105,7 @@ export const useOrderStore = create((set, get) => ({
           ? {
               ...l,
               qty: l.qty + 1,
-              lineTotal: (l.qty + 1) * l.price,
+              lineTotalCents: (l.qty + 1) * l.priceCents,
             }
           : l,
       ),
@@ -115,4 +117,43 @@ export const useOrderStore = create((set, get) => ({
       lines: get().lines.filter((l) => l.productId !== productId),
     });
   },
+
+  clearPayments: () => set({ payments: [] }),
+
+  addPaymentMethod: (method) => {
+    const payments = get().payments;
+    const id = crypto.randomUUID();
+    set({
+      payments: [
+        ...payments,
+        {
+          id,
+          methodId: method.id,
+          methodName: method.name,
+          amountCents: 0,
+        },
+      ],
+    });
+  },
+
+  setPaymentAmount: (paymentId, amountCents) => {
+    const num = Number(amountCents);
+    if (!Number.isFinite(num) || num < 0) return;
+    set({
+      payments: get().payments.map((p) =>
+        p.id === paymentId ? { ...p, amountCents: num } : p,
+      ),
+    });
+  },
+
+  removePayment: (paymentId) => {
+    set({ payments: get().payments.filter((p) => p.id !== paymentId) });
+  },
+
+  totalPaid: () => {
+    return get().payments.reduce((sum, p) => sum + p.amountCents, 0);
+  },
+
+  setLastOrder: (order) => set({ lastOrder: order }),
+  clearLastOrder: () => set({ lastOrder: null }),
 }));
