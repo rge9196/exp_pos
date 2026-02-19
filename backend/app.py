@@ -456,6 +456,151 @@ def refund_order(order_id):
         "receipt_text": ""
     }), 200
 
+@app.get("/api/orders")
+@jwt_required()
+def list_orders():
+    start_date = request.args.get("start_date")
+    end_date = request.args.get("end_date")
+    status = (request.args.get("status") or "all").lower()
+    q = (request.args.get("q") or "").strip()
+
+    def is_valid(d):
+        try:
+            datetime.strptime(d, "%Y-%m-%d")
+            return True
+        except Exception:
+            return False
+
+    if start_date and not is_valid(start_date):
+        return jsonify({"ok": False, "error": "invalid start_date"}), 400
+    if end_date and not is_valid(end_date):
+        return jsonify({"ok": False, "error": "invalid end_date"}), 400
+
+    if not start_date and not end_date:
+        today = date.today().isoformat()
+        start_date = today
+        end_date = today
+    elif start_date and not end_date:
+        end_date = start_date
+    elif end_date and not start_date:
+        start_date = end_date
+
+    params = [start_date, end_date]
+    filters = ["date(o.created_at) BETWEEN date(?) AND date(?)"]
+
+    if status in ("paid", "void", "refund"):
+        filters.append("o.status = ?")
+        params.append(status)
+    elif status != "all":
+        return jsonify({"ok": False, "error": "invalid status"}), 400
+
+    if q:
+        if q.isdigit():
+            filters.append("o.id = ?")
+            params.append(int(q))
+        else:
+            filters.append("u.username LIKE ?")
+            params.append(f"%{q}%")
+
+    where_sql = " AND ".join(filters)
+    rows = db.execute(
+        f"""
+        SELECT
+            o.id, o.created_at, o.status, o.subtotal_cents, o.total_paid_cents,
+            o.change_cents, o.original_order_id, u.id AS user_id, u.username
+        FROM orders o
+        LEFT JOIN users u ON u.id = o.user_id
+        WHERE {where_sql}
+        ORDER BY o.created_at DESC
+        """,
+        *params
+    )
+
+    return jsonify({
+        "range": {"start": start_date, "end": end_date},
+        "orders": [
+            {
+                "id": r["id"],
+                "created_at": r["created_at"],
+                "status": r["status"],
+                "subtotal_cents": r["subtotal_cents"],
+                "total_paid_cents": r["total_paid_cents"],
+                "change_cents": r["change_cents"],
+                "original_order_id": r["original_order_id"],
+                "user": {"id": r["user_id"], "username": r["username"]} if r["user_id"] else None,
+            }
+            for r in rows
+        ],
+    }), 200
+
+
+@app.get("/api/orders/<int:order_id>")
+@jwt_required()
+def order_detail(order_id):
+    rows = db.execute(
+        """
+        SELECT
+            o.id, o.created_at, o.status, o.subtotal_cents, o.total_paid_cents,
+            o.change_cents, o.original_order_id, u.id AS user_id, u.username
+        FROM orders o
+        LEFT JOIN users u ON u.id = o.user_id
+        WHERE o.id = ?
+        """,
+        order_id
+    )
+    if not rows:
+        return jsonify({"ok": False, "error": "order not found"}), 404
+
+    order = rows[0]
+    lines = db.execute(
+        """
+        SELECT name, qty, unit_price_cents, line_total_cents, comment
+        FROM order_lines
+        WHERE order_id = ?
+        """,
+        order_id
+    )
+    payments = db.execute(
+        """
+        SELECT p.payment_method_id, pm.name AS method_name, p.amount_cents
+        FROM payments p
+        JOIN payment_methods pm ON pm.id = p.payment_method_id
+        WHERE p.order_id = ?
+        """,
+        order_id
+    )
+
+    return jsonify({
+        "order": {
+            "id": order["id"],
+            "created_at": order["created_at"],
+            "status": order["status"],
+            "subtotal_cents": order["subtotal_cents"],
+            "total_paid_cents": order["total_paid_cents"],
+            "change_cents": order["change_cents"],
+            "original_order_id": order["original_order_id"],
+            "user": {"id": order["user_id"], "username": order["username"]} if order["user_id"] else None,
+        },
+        "lines": [
+            {
+                "name": l["name"],
+                "qty": l["qty"],
+                "unit_price_cents": l["unit_price_cents"],
+                "line_total_cents": l["line_total_cents"],
+                "comment": l["comment"],
+            }
+            for l in lines
+        ],
+        "payments": [
+            {
+                "payment_method_id": p["payment_method_id"],
+                "method_name": p["method_name"],
+                "amount_cents": p["amount_cents"],
+            }
+            for p in payments
+        ],
+    }), 200
+
 @app.post("/api/orders")
 @jwt_required()
 def create_order():

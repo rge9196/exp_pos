@@ -1,17 +1,22 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
-import { useOrderStore } from "../stores/orderStore";
+import { Navigate, useNavigate, useParams } from "react-router-dom";
+import { useAuthStore } from "../stores/authStore";
 
 function formatMoney(cents) {
   return (Number(cents || 0) / 100).toFixed(2);
 }
 
-export default function Ticket() {
-  const navigate = useNavigate();
+export default function OrderDetail() {
   const { id } = useParams();
+  const navigate = useNavigate();
+  const user = useAuthStore((s) => s.user);
+  const authChecked = useAuthStore((s) => s.authChecked);
 
-  const lastOrder = useOrderStore((s) => s.lastOrder);
-  const clearLastOrder = useOrderStore((s) => s.clearLastOrder);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [order, setOrder] = useState(null);
+  const [lines, setLines] = useState([]);
+  const [payments, setPayments] = useState([]);
 
   const [actionError, setActionError] = useState(null);
   const [voiding, setVoiding] = useState(false);
@@ -19,53 +24,56 @@ export default function Ticket() {
   const [refundOpen, setRefundOpen] = useState(false);
   const [refundPayments, setRefundPayments] = useState([]);
 
-  useEffect(() => {
-    if (!lastOrder) return;
-  }, [lastOrder]);
+  const loadOrder = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/orders/${id}`, { credentials: "include" });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setError(data?.error || "Failed to load order");
+        setLoading(false);
+        return;
+      }
+      setOrder(data.order);
+      setLines(data.lines || []);
+      setPayments(data.payments || []);
+    } catch {
+      setError("Network error");
+    }
+    setLoading(false);
+  };
 
-  if (!lastOrder) {
+  useEffect(() => {
+    loadOrder();
+  }, [id]);
+
+  if (!authChecked) {
     return (
-      <div className="max-w-2xl mx-auto">
-        <div className="border border-zinc-800 rounded-xl p-4 bg-bg">
-          <div className="text-lg font-semibold">Ticket</div>
-          <p className="mt-2 text-sm text-zinc-400">
-            No order loaded. #{id}
-          </p>
-          <button
-            type="button"
-            onClick={() => navigate("/orders")}
-            className="mt-4 px-3 py-2 rounded bg-zinc-800 hover:bg-zinc-700"
-          >
-            Back to Orders
-          </button>
+      <div className="h-full p-4 bg-bg text-fg">
+        <div className="h-[calc(100vh-140px)] rounded-xl border border-zinc-800 bg-bg p-4">
+          Checking session...
         </div>
       </div>
     );
   }
 
-  const order = lastOrder;
-  const lines = order?.lines ?? [];
-  const payments = order?.payments ?? [];
-
-  const handleFinish = () => {
-    clearLastOrder();
-    navigate("/orders");
-  };
+  if (!user) return <Navigate to="/login" replace />;
 
   return (
     <div className="max-w-3xl mx-auto">
       <div className="flex items-center justify-between mb-3 no-print">
-        <div className="text-lg font-semibold">Ticket</div>
+        <div className="text-lg font-semibold">Order Detail</div>
         <div className="flex items-center gap-2">
           {order?.status === "paid" && (
             <button
               type="button"
               onClick={() => {
                 setRefundPayments(
-                  (order?.payments ?? []).map((p) => ({
-                    payment_method_id: p.methodId,
-                    amount_cents: Math.abs(p.amountCents),
-                    methodName: p.methodName,
+                  payments.map((p) => ({
+                    payment_method_id: p.payment_method_id,
+                    amount_cents: Math.abs(p.amount_cents),
+                    methodName: p.method_name,
                   })),
                 );
                 setRefundOpen(true);
@@ -93,12 +101,12 @@ export default function Ticket() {
                   if (!res.ok) {
                     setActionError(data?.error || "Failed to void");
                   } else {
-                    useOrderStore.getState().setLastOrder({
-                      ...order,
+                    setOrder((prev) => ({
+                      ...prev,
                       status: "void",
                       voided_at: data?.order?.voided_at,
                       void_reason: data?.order?.void_reason,
-                    });
+                    }));
                   }
                 } catch {
                   setActionError("Network error");
@@ -120,75 +128,79 @@ export default function Ticket() {
           </button>
           <button
             type="button"
-            onClick={handleFinish}
+            onClick={() => navigate("/history")}
             className="px-3 py-2 rounded bg-emerald-600 hover:bg-emerald-500"
           >
-            Finish
+            Back
           </button>
         </div>
       </div>
       {actionError && <div className="mb-2 text-sm text-red-400">{actionError}</div>}
+      {loading && <div className="mb-2 text-sm text-zinc-400">Loading…</div>}
+      {error && <div className="mb-2 text-sm text-red-400">{error}</div>}
 
-      <div className="ticket border border-zinc-800 rounded-xl p-4 bg-bg">
-        <div className="text-center text-sm font-semibold">POS Receipt</div>
-        <div className="text-center text-xs text-zinc-400">
-          Order #{order?.id} {order?.status ? `(${order.status})` : ""}
-        </div>
-        <div className="mt-2 text-xs text-zinc-400 text-center">
-          {order?.createdAt}
-        </div>
+      {order && (
+        <div className="ticket border border-zinc-800 rounded-xl p-4 bg-bg">
+          <div className="text-center text-sm font-semibold">POS Receipt</div>
+          <div className="text-center text-xs text-zinc-400">
+            Order #{order.id} {order.status ? `(${order.status})` : ""}
+          </div>
+          <div className="mt-2 text-xs text-zinc-400 text-center">
+            {order.created_at}
+          </div>
 
-        <div className="mt-3 border-t border-dashed border-zinc-700" />
+          <div className="mt-3 border-t border-dashed border-zinc-700" />
 
-        <div className="mt-2 space-y-1 text-sm">
-          {lines.map((l) => (
-            <div key={l.id} className="flex justify-between">
-              <div className="min-w-0">
-                <div className="truncate">{l.name}</div>
-                <div className="text-xs text-zinc-500">
-                  {l.qty} × ${formatMoney(l.unitPriceCents)}
-                </div>
-                {l.comment && (
-                  <div className="text-xs text-zinc-500 italic truncate">
-                    “{l.comment}”
+          <div className="mt-2 space-y-1 text-sm">
+            {lines.map((l, idx) => (
+              <div key={idx} className="flex justify-between">
+                <div className="min-w-0">
+                  <div className="truncate">{l.name}</div>
+                  <div className="text-xs text-zinc-500">
+                    {l.qty} × ${formatMoney(l.unit_price_cents)}
                   </div>
-                )}
+                  {l.comment && (
+                    <div className="text-xs text-zinc-500 italic truncate">
+                      “{l.comment}”
+                    </div>
+                  )}
+                </div>
+                <div>${formatMoney(l.line_total_cents)}</div>
               </div>
-              <div>${formatMoney(l.lineTotalCents)}</div>
+            ))}
+          </div>
+
+          <div className="mt-3 border-t border-dashed border-zinc-700" />
+
+          <div className="mt-2 text-sm space-y-1">
+            <div className="flex justify-between">
+              <span>Subtotal</span>
+              <span>${formatMoney(order.subtotal_cents)}</span>
             </div>
-          ))}
-        </div>
-
-        <div className="mt-3 border-t border-dashed border-zinc-700" />
-
-        <div className="mt-2 text-sm space-y-1">
-          <div className="flex justify-between">
-            <span>Subtotal</span>
-            <span>${formatMoney(order?.subtotalCents)}</span>
-          </div>
-          <div className="flex justify-between">
-            <span>Total Paid</span>
-            <span>${formatMoney(order?.totalPaidCents)}</span>
-          </div>
-          <div className="flex justify-between">
-            <span>Change</span>
-            <span>${formatMoney(order?.changeCents)}</span>
-          </div>
-        </div>
-
-        <div className="mt-3 border-t border-dashed border-zinc-700" />
-
-        <div className="mt-2 text-sm space-y-1">
-          {payments.map((p) => (
-            <div key={p.id} className="flex justify-between">
-              <span>{p.methodName}</span>
-              <span>${formatMoney(p.amountCents)}</span>
+            <div className="flex justify-between">
+              <span>Total Paid</span>
+              <span>${formatMoney(order.total_paid_cents)}</span>
             </div>
-          ))}
-        </div>
+            <div className="flex justify-between">
+              <span>Change</span>
+              <span>${formatMoney(order.change_cents)}</span>
+            </div>
+          </div>
 
-        <div className="mt-4 text-center text-xs text-zinc-500">Thank you</div>
-      </div>
+          <div className="mt-3 border-t border-dashed border-zinc-700" />
+
+          <div className="mt-2 text-sm space-y-1">
+            {payments.map((p, idx) => (
+              <div key={idx} className="flex justify-between">
+                <span>{p.method_name}</span>
+                <span>${formatMoney(p.amount_cents)}</span>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-4 text-center text-xs text-zinc-500">Thank you</div>
+        </div>
+      )}
 
       {refundOpen && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
@@ -249,6 +261,7 @@ export default function Ticket() {
                       setActionError(data?.error || "Refund failed");
                     } else {
                       setRefundOpen(false);
+                      navigate(`/orders/${data.refund_order_id}`);
                     }
                   } catch {
                     setActionError("Network error");
