@@ -1,4 +1,5 @@
 from flask import Flask, request, jsonify
+from datetime import datetime, date
 from cs50 import SQL
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -210,6 +211,135 @@ def get_payment_methods():
     methods = [{"id": r["id"], "name": r["name"]} for r in rows]
     return jsonify({"methods": methods})
 
+@app.get("/api/reports/z")
+@jwt_required()
+def z_report():
+    start_date = request.args.get("start_date")
+    end_date = request.args.get("end_date")
+
+    def is_valid(d):
+        try:
+            datetime.strptime(d, "%Y-%m-%d")
+            return True
+        except Exception:
+            return False
+
+    if start_date and not is_valid(start_date):
+        return jsonify({"ok": False, "error": "invalid start_date"}), 400
+    if end_date and not is_valid(end_date):
+        return jsonify({"ok": False, "error": "invalid end_date"}), 400
+
+    if not start_date and not end_date:
+        today = date.today().isoformat()
+        start_date = today
+        end_date = today
+    elif start_date and not end_date:
+        end_date = start_date
+    elif end_date and not start_date:
+        start_date = end_date
+
+    totals_row = db.execute(
+        """
+        SELECT
+            COUNT(*) AS orders_count,
+            COALESCE(SUM(subtotal_cents), 0) AS subtotal_cents,
+            COALESCE(SUM(total_paid_cents), 0) AS paid_cents,
+            COALESCE(SUM(change_cents), 0) AS change_cents
+        FROM orders
+        WHERE date(created_at) BETWEEN date(?) AND date(?)
+        """,
+        start_date, end_date
+    )
+    totals = totals_row[0] if totals_row else {
+        "orders_count": 0, "subtotal_cents": 0, "paid_cents": 0, "change_cents": 0
+    }
+
+    payments = db.execute(
+        """
+        SELECT
+            pm.name AS method,
+            COALESCE(SUM(p.amount_cents), 0) AS amount_cents
+        FROM payments p
+        JOIN payment_methods pm ON pm.id = p.payment_method_id
+        JOIN orders o ON o.id = p.order_id
+        WHERE date(o.created_at) BETWEEN date(?) AND date(?)
+        GROUP BY pm.id, pm.name
+        ORDER BY pm.id
+        """,
+        start_date, end_date
+    )
+
+    return jsonify({
+        "range": {"start": start_date, "end": end_date},
+        "totals": {
+            "orders_count": int(totals["orders_count"]),
+            "subtotal_cents": int(totals["subtotal_cents"]),
+            "paid_cents": int(totals["paid_cents"]),
+            "change_cents": int(totals["change_cents"]),
+        },
+        "payments_by_method": [
+            {"method": r["method"], "amount_cents": int(r["amount_cents"])}
+            for r in payments
+        ],
+    }), 200
+
+@app.get("/api/reports/products")
+@jwt_required()
+def product_report():
+    start_date = request.args.get("start_date")
+    end_date = request.args.get("end_date")
+
+    def is_valid(d):
+        try:
+            datetime.strptime(d, "%Y-%m-%d")
+            return True
+        except Exception:
+            return False
+
+    if start_date and not is_valid(start_date):
+        return jsonify({"ok": False, "error": "invalid start_date"}), 400
+    if end_date and not is_valid(end_date):
+        return jsonify({"ok": False, "error": "invalid end_date"}), 400
+
+    if not start_date and not end_date:
+        today = date.today().isoformat()
+        start_date = today
+        end_date = today
+    elif start_date and not end_date:
+        end_date = start_date
+    elif end_date and not start_date:
+        start_date = end_date
+
+    rows = db.execute(
+        """
+        SELECT
+            ol.product_id,
+            ol.name,
+            ol.unit_price_cents,
+            SUM(ol.qty) AS qty,
+            SUM(ol.line_total_cents) AS total_cents
+        FROM order_lines ol
+        JOIN orders o ON o.id = ol.order_id
+        WHERE date(o.created_at) BETWEEN date(?) AND date(?)
+        GROUP BY ol.product_id, ol.name, ol.unit_price_cents
+        ORDER BY ol.name, ol.unit_price_cents DESC
+        """,
+        start_date, end_date
+    )
+
+    return jsonify({
+        "range": {"start": start_date, "end": end_date},
+        "rows": [
+            {
+                "product_id": int(r["product_id"]),
+                "name": r["name"],
+                "unit_price_cents": int(r["unit_price_cents"]),
+                "qty": int(r["qty"]),
+                "total_cents": int(r["total_cents"]),
+            }
+            for r in rows
+        ],
+    }), 200
 
 @app.post("/api/orders")
 @jwt_required()

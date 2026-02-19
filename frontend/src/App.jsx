@@ -8,6 +8,8 @@ import Register from "./pages/Register";
 import Orders from "./pages/Orders";
 import Checkout from "./pages/Checkout";
 import Ticket from "./pages/Ticket";
+import ZReport from "./pages/ZReport";
+import ProductReport from "./pages/ProductReport";
 
 export default function App() {
   const me = useAuthStore((s) => s.me);
@@ -27,6 +29,8 @@ export default function App() {
             <div className="flex items-center gap-4">
               <Link to="/">Home</Link>
               {user && <Link to="/orders">Orders</Link>}
+              {user && <Link to="/reports/z">Z Report</Link>}
+              {user && <Link to="/reports/products">Product Report</Link>}
             </div>
 
             {/* RIGHT — THIS PART CHANGED */}
@@ -57,6 +61,8 @@ export default function App() {
               <Route path="/orders" element={<Orders />} />
               <Route path="/checkout" element={<Checkout />} />
               <Route path="/ticket/:id" element={<Ticket />} />
+              <Route path="/reports/z" element={<ZReport />} />
+              <Route path="/reports/products" element={<ProductReport />} />
             </Routes>
           </main>
 
