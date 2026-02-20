@@ -135,8 +135,8 @@ This system uses date-based reporting instead of register open/close session acc
 
 1. Activate the backend virtual environment:
    `source backend/.venv/bin/activate`
-2. If dependencies are missing, install:
-   `pip install flask flask-jwt-extended cs50 werkzeug`
+2. Install dependencies:
+   `pip install -r backend/requirements.txt`
 3. Start the API server:
    `python backend/app.py`
 
