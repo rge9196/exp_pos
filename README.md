@@ -1,4 +1,4 @@
-# Bakery/Cafe POS Application
+# Small retail POS Application
 
 ## 1. Overview
 
