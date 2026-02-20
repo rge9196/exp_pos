@@ -153,21 +153,53 @@ Frontend runs on Vite (typically `http://localhost:5173`) and proxies `/api` to 
 
 ### Database Initialization
 
-Use existing database file:
+DATABASE SETUP
 
-- `backend/pos.db`
+This application uses a local SQLite database located at:
 
-Apply non-destructive schema migrations when needed:
+    backend/pos.db
 
-- Checkout tables:
-  `sqlite3 backend/pos.db < backend/schema_checkout.sql`
-- Void/refund columns:
-  `sqlite3 backend/pos.db < backend/schema_void_refund.sql`
+The database file is NOT included in the repository.
+After cloning or forking the project, you must create it using the provided schema.
 
-Notes:
+---
 
-- These migrations are additive and do not drop existing data.
-- Core table creation is also guarded in backend startup with `CREATE TABLE IF NOT EXISTS`.
+1. Create the database
+
+---
+
+From the project root, run:
+
+    sqlite3 backend/pos.db < backend/schema.sql
+
+This will create all required tables and seed initial data.
+
+---
+
+2. Create the first user
+
+---
+
+User registration is intended for administrative setup and is hidden from the main UI.
+
+To create the initial cashier/admin account:
+
+1. Start the backend and frontend servers.
+2. Open your browser and navigate directly to:
+
+   http://localhost:5173/register
+
+3. Register the first user.
+
+After this step, the application can be used normally via the login screen.
+
+---
+
+## NOTES
+
+• Do not commit pos.db if it contains real data.
+• The schema script is safe to run on a new database.
+• In production, use controlled user provisioning instead of public registration.
 
 ## 9. Future Enhancements (Roadmap)
 
