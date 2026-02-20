@@ -1,5 +1,9 @@
 # Small retail POS Application
 
+#### Video Demo: https://youtu.be/VjcvZGOXuVA
+
+#### Description:
+
 ## 1. Overview
 
 This project is a lightweight Point-of-Sale (POS) system designed for small food retail operations.
